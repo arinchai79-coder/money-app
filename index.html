@@ -372,24 +372,73 @@ html,body{height:100%;background:linear-gradient(145deg,#c8e8fa 0%,#ddd6fe 40%,#
     </div>
   </div>
 </div>
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDinHNDkN7_ZduGJEQ1v88WEhDk98vpSjU",
+  authDomain: "money-app-7b7df.firebaseapp.com",
+  projectId: "money-app-7b7df",
+  storageBucket: "money-app-7b7df.firebasestorage.app",
+  messagingSenderId: "166450411658",
+  appId: "1:166450411658:web:91989c54b1f458b47dd573"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// ── show loading until auth ready ──
+function showSyncStatus(msg, color='#6366f1'){
+  let el=document.getElementById('syncStatus');
+  if(!el){el=document.createElement('div');el.id='syncStatus';Object.assign(el.style,{position:'fixed',top:'8px',left:'50%',transform:'translateX(-50%)',background:'rgba(255,255,255,.92)',backdropFilter:'blur(12px)',border:'1px solid rgba(99,102,241,.3)',borderRadius:'20px',padding:'5px 14px',fontSize:'.72rem',fontWeight:'700',zIndex:'999',fontFamily:'Sarabun,sans-serif',boxShadow:'0 2px 12px rgba(0,0,0,.1)',transition:'opacity .3s'});document.body.appendChild(el);}
+  el.textContent=msg;el.style.color=color;el.style.opacity='1';
+  if(color==='#059669') setTimeout(()=>{el.style.opacity='0'},2500);
+}
+
 const IC=['เงินเดือน','ค่าจ้าง','โบนัส','ดอกเบี้ย','ลงทุน','ขายของ','อื่นๆ'];
 const EC=['อาหาร','เดินทาง','ที่อยู่อาศัย','สุขภาพ','บันเทิง','ช้อปปิ้ง','ออมทรัพย์','อื่นๆ'];
 const ICONS={เงินเดือน:'💼',ค่าจ้าง:'🛠️',โบนัส:'🎁',ดอกเบี้ย:'🏦',ลงทุน:'📈',ขายของ:'🛒',อาหาร:'🍜',เดินทาง:'🚗',ที่อยู่อาศัย:'🏠',สุขภาพ:'💊',บันเทิง:'🎬',ช้อปปิ้ง:'👜',ออมทรัพย์:'💰',อื่นๆ:'📝'};
 const CLRS={อาหาร:'#fef9c3',เดินทาง:'#dbeafe',ที่อยู่อาศัย:'#e0f2fe',สุขภาพ:'#dcfce7',บันเทิง:'#f3e8ff',ช้อปปิ้ง:'#fce7f3',ออมทรัพย์:'#d1fae5',เงินเดือน:'#d1fae5',ค่าจ้าง:'#dbeafe',โบนัส:'#fef9c3',ดอกเบี้ย:'#e0f2fe',ลงทุน:'#f3e8ff',ขายของ:'#fef9c3',อื่นๆ:'#f3f4f6'};
 const MTH=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 const MS=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
 let vy,vm,cur='income',editId=null,curWallet='cash';
-const gTx=()=>JSON.parse(localStorage.getItem('mapp')||'[]');
-const sTx=a=>localStorage.setItem('mapp',JSON.stringify(a));
+let ALL_TX=[];   // in-memory cache synced from Firestore
+let uid=null;    // anonymous user id
+let txColRef=null;
+
+// ── Firebase CRUD ──
+async function fbAdd(tx){
+  if(!txColRef) return;
+  await setDoc(doc(txColRef, String(tx.id)), tx);
+}
+async function fbUpdate(tx){
+  if(!txColRef) return;
+  await setDoc(doc(txColRef, String(tx.id)), tx, {merge:true});
+}
+async function fbDelete(id){
+  if(!txColRef) return;
+  await deleteDoc(doc(txColRef, String(id)));
+}
+
+// ── Helpers ──
+const gTx=()=>ALL_TX;
 const fmt=n=>'฿'+n.toLocaleString('th-TH',{minimumFractionDigits:0,maximumFractionDigits:2});
 const fmtD=d=>{const[y,m,dd]=d.split('-');return`${+dd} ${MS[+m-1]}`};
+
 function setWallet(w){
   curWallet=w;
   document.getElementById('wseg-cash').classList.toggle('active',w==='cash');
   document.getElementById('wseg-bank').classList.toggle('active',w==='bank');
 }
-function init(){const n=new Date();vy=n.getFullYear();vm=n.getMonth();document.getElementById('f-date').value=n.toISOString().split('T')[0];updCat();render()}
+function init(){
+  const n=new Date();vy=n.getFullYear();vm=n.getMonth();
+  document.getElementById('f-date').value=n.toISOString().split('T')[0];
+  updCat();
+}
 function chM(d){vm+=d;if(vm<0){vm=11;vy--}if(vm>11){vm=0;vy++}render()}
 function goTab(t){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -411,7 +460,7 @@ function openSheet(){
   setTimeout(()=>document.getElementById('f-amt').focus(),350);
 }
 function openEdit(id){
-  const tx=gTx().find(t=>t.id===id);if(!tx)return;
+  const tx=ALL_TX.find(t=>t.id===id);if(!tx)return;
   editId=id;
   document.querySelector('.sheet-title').textContent='แก้ไขรายการ';
   document.querySelector('.btn-save').textContent='✓ บันทึกการแก้ไข';
@@ -428,27 +477,36 @@ function closeSheet(){document.getElementById('overlay').classList.remove('open'
 function closeOut(e){if(e.target===document.getElementById('overlay'))closeSheet()}
 function setType(t){cur=t;document.getElementById('seg-i').classList.toggle('active',t==='income');document.getElementById('seg-e').classList.toggle('active',t==='expense');updCat()}
 function updCat(){const s=document.getElementById('f-cat');s.innerHTML=(cur==='income'?IC:EC).map(c=>`<option>${c}</option>`).join('')}
-function addTx(){
+
+async function addTx(){
   const desc=document.getElementById('f-desc').value.trim();
   const amt=parseFloat(document.getElementById('f-amt').value);
   const cat=document.getElementById('f-cat').value;
   const date=document.getElementById('f-date').value;
   const wallet=curWallet;
   if(!desc||!amt||amt<=0||!date)return;
-  let arr=gTx();
+  showSyncStatus('☁️ กำลังบันทึก...');
   if(editId){
-    arr=arr.map(t=>t.id===editId?{...t,type:cur,desc,amt,cat,date,wallet}:t);
+    const tx={...ALL_TX.find(t=>t.id===editId),type:cur,desc,amt,cat,date,wallet};
+    await fbUpdate(tx);
     editId=null;
   } else {
-    arr.push({id:Date.now(),type:cur,desc,amt,cat,date,wallet});
+    const tx={id:Date.now(),type:cur,desc,amt,cat,date,wallet};
+    await fbAdd(tx);
+    proactiveCheck(tx);
   }
-  sTx(arr);
-  const savedTx={type:cur,desc,amt,cat,date,wallet};
-  document.getElementById('f-amt').value='';document.getElementById('f-desc').value='';
-  closeSheet();render();
-  if(!editId) proactiveCheck(savedTx);
+  showSyncStatus('✅ บันทึกแล้ว','#059669');
+  document.getElementById('f-amt').value='';
+  document.getElementById('f-desc').value='';
+  closeSheet();
 }
-function delTx(id){if(!confirm('ลบรายการนี้?'))return;sTx(gTx().filter(t=>t.id!==id));render()}
+
+async function delTx(id){
+  if(!confirm('ลบรายการนี้?'))return;
+  showSyncStatus('☁️ กำลังลบ...');
+  await fbDelete(id);
+  showSyncStatus('✅ ลบแล้ว','#059669');
+}
 function render(){
   const lbl=`${MTH[vm]} ${vy+543}`;
   ['ml1','ml2'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=lbl});
@@ -532,12 +590,45 @@ function renderStats(mon,inc,exp){
     ${it.length?`<div class="sec-title" style="margin-top:8px">รายรับตามหมวดหมู่</div><div class="cat-card">${bars(it,'inc')}</div>`:''}
     <div style="height:16px"></div>`;
 }
-function exportCSV(){
-  const all=gTx();if(!all.length){alert('ไม่มีข้อมูล');return}
-  const csv='\uFEFF'+'วันที่,ประเภท,หมวดหมู่,รายละเอียด,จำนวนเงิน\n'+all.map(t=>`${t.date},${t.type==='income'?'รายรับ':'รายจ่าย'},${t.cat},"${t.desc}",${t.amt}`).join('\n');
+async function exportCSV(){
+  if(!ALL_TX.length){alert('ไม่มีข้อมูล');return}
+  const csv='\uFEFF'+'วันที่,ประเภท,กระเป๋า,หมวดหมู่,รายละเอียด,จำนวนเงิน\n'+ALL_TX.map(t=>`${t.date},${t.type==='income'?'รายรับ':'รายจ่าย'},${t.wallet==='bank'?'บัญชี':'เงินสด'},${t.cat},"${t.desc}",${t.amt}`).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));a.download=`เงินฉัน_${new Date().toISOString().split('T')[0]}.csv`;a.click();
 }
-function clearAll(){if(confirm('ยืนยันการลบทั้งหมด?\nไม่สามารถกู้คืนได้')){localStorage.removeItem('mapp');render()}}
+async function clearAll(){
+  if(!confirm('ยืนยันการลบทั้งหมด?\nไม่สามารถกู้คืนได้'))return;
+  showSyncStatus('☁️ กำลังลบ...');
+  const dels=ALL_TX.map(t=>deleteDoc(doc(txColRef,String(t.id))));
+  await Promise.all(dels);
+  showSyncStatus('✅ ล้างข้อมูลแล้ว','#059669');
+}
+
+// ── Boot: sign in anonymously → listen Firestore realtime ──
+showSyncStatus('🔄 กำลังเชื่อมต่อ...');
+onAuthStateChanged(auth, user=>{
+  if(user){
+    uid=user.uid;
+    txColRef=collection(db,'users',uid,'transactions');
+    // realtime listener — UI updates automatically
+    onSnapshot(query(txColRef,orderBy('date','desc')), snap=>{
+      ALL_TX=snap.docs.map(d=>d.data());
+      render();
+      showSyncStatus('☁️ ซิงค์แล้ว','#059669');
+    });
+  }
+});
+signInAnonymously(auth).catch(e=>showSyncStatus('❌ เชื่อมต่อไม่ได้','#dc2626'));
+
+// expose globals for onclick handlers
+window.chM=chM;window.goTab=goTab;window.openSheet=openSheet;window.openEdit=openEdit;
+window.closeSheet=closeSheet;window.closeOut=closeOut;window.setType=setType;
+window.setWallet=setWallet;window.addTx=addTx;window.delTx=delTx;
+window.exportCSV=exportCSV;window.clearAll=clearAll;
+window.runAnalysis=runAnalysis;window.askAI=askAI;
+window.closeAlert=closeAlert;window.closeToast=closeToast;
+window.renderHabits=renderHabits;
+
+init();
 
 // ── AI: build full context from ALL history ──
 function buildFullContext(){
@@ -738,8 +829,6 @@ async function askAI(q){
   catch(e){showAIResult('เกิดข้อผิดพลาด กรุณาลองใหม่')}
   document.querySelectorAll('.ai-q').forEach(b=>b.disabled=false);
 }
-
-init();
 </script>
 </body>
 </html>
