@@ -122,7 +122,14 @@ html,body{height:100%;background:linear-gradient(145deg,#c8e8fa 0%,#ddd6fe 40%,#
 .s-chev{color:var(--text3);font-size:.8rem}
 ::-webkit-scrollbar{display:none}
 /* ── AI Inline Alert (home page) ── */
-/* ── Wallet Cards ── */
+/* ── Date group ── */
+.date-group{margin-bottom:4px}
+.date-sep{display:flex;align-items:center;justify-content:space-between;padding:10px 4px 6px;margin:0 16px}
+.date-sep-label{font-size:.78rem;font-weight:700;color:var(--text2)}
+.date-sep-sum{font-size:.78rem;font-weight:700}
+.tx-list{display:flex;flex-direction:column;gap:0px;padding:0}
+.date-group .tx-card{margin:0 16px 6px;border-radius:var(--r2)}
+.tx-list{display:flex;flex-direction:column;}
 .wallets{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 16px 14px}
 .wallet-card{background:var(--glass3);border:1px solid var(--border);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow2);position:relative;overflow:hidden}
 .wallet-card::before{content:'';position:absolute;top:-18px;right:-18px;width:70px;height:70px;border-radius:50%;opacity:.2}
@@ -531,22 +538,52 @@ function render(){
 
   document.getElementById('txTitle').textContent=`รายการเดือนนี้ (${mon.length})`;
   const list=document.getElementById('txList');
-  list.innerHTML=!mon.length
-    ?`<div class="empty-state"><span class="ei">✨</span><p>ยังไม่มีรายการ<br>กด <strong>+ เพิ่ม</strong> เพื่อเริ่มต้น</p></div>`
-    :mon.map(t=>{
-      const w=t.wallet||'cash';
-      const wLabel=w==='cash'?'💵 สด':'🏦 บัญชี';
-      return`<div class="tx-card ${t.type==='income'?'inc':'exp'}">
-        <div class="tx-ico" style="background:${CLRS[t.cat]||'#f3f4f6'}">${ICONS[t.cat]||'📝'}</div>
-        <div class="tx-info"><div class="tx-desc">${t.desc}</div><div class="tx-meta">${t.cat} · ${fmtD(t.date)}</div></div>
-        <span class="tx-wallet ${w}">${wLabel}</span>
-        <div class="tx-amt">${t.type==='income'?'+':'-'}${fmt(t.amt)}</div>
-        <div class="tx-actions">
-          <button class="tx-edit" onclick="openEdit(${t.id})">✏️</button>
-          <button class="tx-del" onclick="delTx(${t.id})">✕</button>
-        </div>
-      </div>`;
+  if(!mon.length){
+    list.innerHTML=`<div class="empty-state"><span class="ei">✨</span><p>ยังไม่มีรายการ<br>กด <strong>+ เพิ่ม</strong> เพื่อเริ่มต้น</p></div>`;
+  } else {
+    // group by date
+    const byDate={};
+    mon.forEach(t=>{byDate[t.date]=byDate[t.date]||[];byDate[t.date].push(t)});
+    const dateKeys=Object.keys(byDate).sort((a,b)=>new Date(b)-new Date(a));
+    const today=new Date().toISOString().split('T')[0];
+    const yesterday=new Date(Date.now()-86400000).toISOString().split('T')[0];
+    const dayLabel=d=>{
+      if(d===today) return'วันนี้';
+      if(d===yesterday) return'เมื่อวาน';
+      const[y,m,dd]=d.split('-');
+      const days=['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัส','ศุกร์','เสาร์'];
+      const dow=new Date(d).getDay();
+      return`${days[dow]} ${+dd} ${MS[+m-1]}`;
+    };
+    list.innerHTML=dateKeys.map(date=>{
+      const txs=byDate[date];
+      const dayExp=txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+      const dayInc=txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+      const summary=dayInc>0&&dayExp>0?`+${fmt(dayInc)} / -${fmt(dayExp)}`:dayInc>0?`+${fmt(dayInc)}`:`-${fmt(dayExp)}`;
+      const summaryColor=dayInc>0&&dayExp===0?'#059669':dayExp>0&&dayInc===0?'#dc2626':'#6366f1';
+      return`
+        <div class="date-group">
+          <div class="date-sep">
+            <span class="date-sep-label">${dayLabel(date)}</span>
+            <span class="date-sep-sum" style="color:${summaryColor}">${summary}</span>
+          </div>
+          ${txs.map(t=>{
+            const w=t.wallet||'cash';
+            const wLabel=w==='cash'?'💵 สด':'🏦 บัญชี';
+            return`<div class="tx-card ${t.type==='income'?'inc':'exp'}">
+              <div class="tx-ico" style="background:${CLRS[t.cat]||'#f3f4f6'}">${ICONS[t.cat]||'📝'}</div>
+              <div class="tx-info"><div class="tx-desc">${t.desc}</div><div class="tx-meta">${t.cat}</div></div>
+              <span class="tx-wallet ${w}">${wLabel}</span>
+              <div class="tx-amt">${t.type==='income'?'+':'-'}${fmt(t.amt)}</div>
+              <div class="tx-actions">
+                <button class="tx-edit" onclick="openEdit(${t.id})">✏️</button>
+                <button class="tx-del" onclick="delTx(${t.id})">✕</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`;
     }).join('');
+  }
   renderStats(mon,inc,exp);
 }
 function renderStats(mon,inc,exp){
